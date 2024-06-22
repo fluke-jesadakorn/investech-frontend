@@ -100,7 +100,7 @@ const App: React.FC = () => {
     const symbol = filters.Symbol ? (filters.Symbol[0] as string) : "";
 
     fetch(
-      `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/v1/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
     )
       .then((res) => res.json())
       .then((response) => {
