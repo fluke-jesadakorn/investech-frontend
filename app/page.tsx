@@ -115,7 +115,7 @@ export default function Home() {
     const symbol = filters.Symbol ? (filters.Symbol[0] as string) : "";
 
     fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/data?page=${page}&limit=5&sort=${sort}&order=${order}&Symbol=${symbol}`
     )
       .then((res) => res.json())
       .then((response) => {
@@ -341,18 +341,6 @@ export default function Home() {
           value: "Q4",
         },
       ],
-    },
-    {
-      title: "EPS",
-      dataIndex: "EPS",
-      key: "EPS",
-      sorter: true,
-      sortOrder:
-        sortedInfo instanceof Array
-          ? (sortedInfo[0].columnKey === "EPS" && sortedInfo[0].order) ||
-            undefined
-          : (sortedInfo.columnKey === "EPS" && sortedInfo.order) || undefined,
-      ellipsis: true,
     },
     {
       title: "Predict Price",
