@@ -1,0 +1,17 @@
+/* styles/globals.css */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+        "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+.site-layout-content {
+    margin-top: 50px;
+    background: #fff;
+    padding: 24px;
+    min-height: 280px;
+}
+
+.ant-list-item-meta-title {
+    font-size: 18px;
+    color: #333;
+}

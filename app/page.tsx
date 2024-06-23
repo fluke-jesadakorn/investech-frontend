@@ -1,6 +1,7 @@
 // import { databaseClient, client } from "@/tina/__generated__/databaseClient";
 // import { tinaField } from "tinacms/dist/react";
-// import HomePage from "@/components/homePage";
+// import HomePage from "@/app/components/homePage";
+// import { Layout } from "antd";
 
 // export default async function Home() {
 //   const { data, query, variables } = await databaseClient.queries.page({
@@ -8,35 +9,48 @@
 //   });
 
 //   return (
-//     <HomePage data={JSON.parse(JSON.stringify(data))} variables={variables} query={query} />
-//     // <>
-//     //   {data.page?.blocks?.map((item, index) => {
-//     //     switch (item?.__typename) {
-//     //       case "PageBlocksHero":
-//     //         return (
-//     //           // <div data-tina-field={tinaField(item, "tagline")} key={index}>
-//     //           //   {item.tagline}
-//     //           // </div>
-//     //           <HomePage data={data} variables={variables}, query={query}/>
-//     //         );
-//     //     }
-//     //   })}
-//     // </>
+//     // <HomePage
+//     //   data={JSON.parse(JSON.stringify(data))}
+//     //   variables={variables}
+//     //   query={query}
+//     // />
+//     // pages/index.js
+//     <>
+//       <h1>Welcome to Our Investment Website</h1>
+//       <p>Overview of services...</p>
+//     </>
 //   );
 // }
-
-// app/page.tsx
 "use client";
+// pages/index.js
+import {
+  Button,
+  Row,
+  Col,
+  Typography,
+  List,
+  Space,
+  PaginationProps,
+  InputRef,
+  Table,
+  AutoComplete,
+  Input,
+  TableColumnsType,
+} from "antd";
+import { CheckCircleOutlined } from "@ant-design/icons";
+import "./styles/index.scss";
+import { useEffect, useRef, useState } from "react";
+import {
+  ColumnType,
+  FilterValue,
+  SorterResult,
+  TablePaginationConfig,
+} from "antd/es/table/interface";
 
-import React, { useRef, useState, useEffect } from "react";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Input, Space, Table, AutoComplete } from "antd";
 import Highlighter from "react-highlight-words";
-import moment from "moment";
-import type { ColumnType, TablePaginationConfig } from "antd/es/table";
-import type { PaginationProps, InputRef, TableColumnsType } from "antd";
-import Link from "next/link";
-import { FilterValue, SorterResult } from "antd/es/table/interface";
+
+const { Title } = Typography;
 
 interface Document {
   key: string;
@@ -46,18 +60,19 @@ interface Document {
   Datetime: string;
   Url: string;
   EPS: number;
+  PredictPrice: number;
 }
 
 type DataIndex = keyof Document;
 
-const App: React.FC = () => {
+export default function Home() {
   const [data, setData] = useState<Document[]>([]);
   const [pagination, setPagination] = useState<PaginationProps>({
     current: 1,
-    pageSize: 10,
+    pageSize: 5,
     total: 0,
     showSizeChanger: true,
-    pageSizeOptions: ["10", "20", "50", "100"],
+    pageSizeOptions: ["5"],
   });
   const [loading, setLoading] = useState(false);
   const [filteredInfo, setFilteredInfo] = useState<
@@ -68,7 +83,7 @@ const App: React.FC = () => {
   >({});
   const [searchText, setSearchText] = useState("");
   const [searchedColumn, setSearchedColumn] = useState<DataIndex | "">("");
-  const [symbolOptions, setSymbolOptions] = useState<string[]>([]);
+  const [symbolOptions, setSymbolOptions] = useState<string[]>([]); // Initialize as an empty array
   const searchInput = useRef<InputRef>(null);
 
   useEffect(() => {
@@ -100,7 +115,7 @@ const App: React.FC = () => {
     const symbol = filters.Symbol ? (filters.Symbol[0] as string) : "";
 
     fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL}/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
     )
       .then((res) => res.json())
       .then((response) => {
@@ -153,11 +168,11 @@ const App: React.FC = () => {
 
   const fetchSymbols = (query: string) => {
     fetch(
-      `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/v1/symbols?query=${query}`
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/symbols?query=${query}`
     )
       .then((res) => res.json())
       .then((response) => {
-        setSymbolOptions(response.symbols);
+        setSymbolOptions(response.symbols || []); // Ensure it sets an array
       })
       .catch((error) => {
         console.error("There was an error fetching the symbols!", error);
@@ -328,31 +343,6 @@ const App: React.FC = () => {
       ],
     },
     {
-      title: "Datetime",
-      dataIndex: "Datetime",
-      key: "Datetime",
-      sorter: true,
-      sortOrder:
-        sortedInfo instanceof Array
-          ? (sortedInfo[0].columnKey === "Datetime" && sortedInfo[0].order) ||
-            undefined
-          : (sortedInfo.columnKey === "Datetime" && sortedInfo.order) ||
-            undefined,
-      ellipsis: true,
-      render: (text: string) => moment(text).format("DD/MM/YYYY MM:HH"), // Format the date
-    },
-    {
-      title: "Url",
-      dataIndex: "Url",
-      key: "Url",
-      ellipsis: true,
-      render: (text: string) => (
-        <Link href={text}>
-          <Button type="primary">Link</Button>
-        </Link>
-      ),
-    },
-    {
       title: "EPS",
       dataIndex: "EPS",
       key: "EPS",
@@ -364,47 +354,68 @@ const App: React.FC = () => {
           : (sortedInfo.columnKey === "EPS" && sortedInfo.order) || undefined,
       ellipsis: true,
     },
+    {
+      title: "Predict Price",
+      dataIndex: "PredictPrice",
+      key: "PredictPrice",
+      sorter: true,
+      sortOrder:
+        sortedInfo instanceof Array
+          ? (sortedInfo[0].columnKey === "PredictPrice" &&
+              sortedInfo[0].order) ||
+            undefined
+          : (sortedInfo.columnKey === "PredictPrice" && sortedInfo.order) ||
+            undefined,
+      ellipsis: true,
+    },
   ];
-
   return (
-    <div>
-      <Space style={{ marginBottom: 16 }}>
-        <Button
-          onClick={() =>
-            handleTableChange(
-              pagination,
-              filteredInfo,
-              {
-                columnKey: "EPS",
-                order: "descend",
-              },
-              {}
-            )
-          }
-        >
-          Sort EPS
-        </Button>
-        <Button onClick={() => setFilteredInfo({})}>Clear filters</Button>
-        <Button
-          onClick={() => {
-            setFilteredInfo({});
-            setSortedInfo([]);
-            fetchData(pagination.current!, pagination.pageSize!, [], {});
-          }}
-        >
-          Clear filters and sorters
-        </Button>
-      </Space>
-      <Table
-        columns={columns}
-        rowKey="id"
-        dataSource={data}
-        pagination={pagination}
-        loading={loading}
-        onChange={handleTableChange}
-      />
+    <div className="site-layout-content">
+      <Row gutter={[16, 16]} align="middle">
+        <Col xs={12} md={12}>
+          <Title level={2}>ลงทุนสบายใจด้วยเทคโนโลยี</Title>
+          <Title level={3} style={{ color: "#008C8C" }}>
+            Investech จัดการพอร์ตให้เติบโตด้วยสินทรัพย์คุณภาพดีทั่วโลก
+          </Title>
+          <List
+            itemLayout="horizontal"
+            dataSource={[
+              "ลงทุนระยะยาวอย่างมีหลักการ",
+              "ค่าธรรมเนียมการจัดการ 0.5% ต่อปี",
+              "บริหารและปรับพอร์ตอัตโนมัติ",
+            ]}
+            renderItem={(item) => (
+              <List.Item>
+                <List.Item.Meta
+                  avatar={<CheckCircleOutlined style={{ color: "#008C8C" }} />}
+                  title={item}
+                />
+              </List.Item>
+            )}
+          />
+          <Button
+            type="primary"
+            size="large"
+            style={{
+              marginTop: "20px",
+              backgroundColor: "#008C8C",
+              borderColor: "#008C8C",
+            }}
+          >
+            เริ่มต้นลงทุน
+          </Button>
+        </Col>
+        <Col xs={12} md={12}>
+          <Table
+            columns={columns}
+            rowKey="id"
+            dataSource={data}
+            // pagination={pagination}
+            loading={loading}
+            onChange={handleTableChange}
+          />
+        </Col>
+      </Row>
     </div>
   );
-};
-
-export default App;
+}

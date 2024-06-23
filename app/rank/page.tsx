@@ -1,4 +1,5 @@
 "use client";
+
 import React, { useRef, useState, useEffect } from "react";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Input, Space, Table, AutoComplete } from "antd";
@@ -7,7 +8,7 @@ import moment from "moment";
 import type { ColumnType, TablePaginationConfig } from "antd/es/table";
 import type { PaginationProps, InputRef, TableColumnsType } from "antd";
 import Link from "next/link";
-import { FilterValue, SorterResult, SortOrder } from "antd/es/table/interface";
+import { FilterValue, SorterResult } from "antd/es/table/interface";
 
 interface Document {
   key: string;
@@ -17,6 +18,7 @@ interface Document {
   Datetime: string;
   Url: string;
   EPS: number;
+  PredictPrice: number;
 }
 
 type DataIndex = keyof Document;
@@ -39,7 +41,7 @@ const App: React.FC = () => {
   >({});
   const [searchText, setSearchText] = useState("");
   const [searchedColumn, setSearchedColumn] = useState<DataIndex | "">("");
-  const [symbolOptions, setSymbolOptions] = useState<string[]>([]);
+  const [symbolOptions, setSymbolOptions] = useState<string[]>([]); // Initialize as an empty array
   const searchInput = useRef<InputRef>(null);
 
   useEffect(() => {
@@ -71,7 +73,7 @@ const App: React.FC = () => {
     const symbol = filters.Symbol ? (filters.Symbol[0] as string) : "";
 
     fetch(
-      `http://localhost:8080/api/v1/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
     )
       .then((res) => res.json())
       .then((response) => {
@@ -123,10 +125,12 @@ const App: React.FC = () => {
   };
 
   const fetchSymbols = (query: string) => {
-    fetch(`http://localhost:8080/api/v1/symbols?query=${query}`)
+    fetch(
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/symbols?query=${query}`
+    )
       .then((res) => res.json())
       .then((response) => {
-        setSymbolOptions(response.symbols);
+        setSymbolOptions(response.symbols || []); // Ensure it sets an array
       })
       .catch((error) => {
         console.error("There was an error fetching the symbols!", error);
@@ -316,7 +320,7 @@ const App: React.FC = () => {
       key: "Url",
       ellipsis: true,
       render: (text: string) => (
-        <Link href={text}>
+        <Link href={text} target="_blank">
           <Button type="primary">Link</Button>
         </Link>
       ),
@@ -331,6 +335,20 @@ const App: React.FC = () => {
           ? (sortedInfo[0].columnKey === "EPS" && sortedInfo[0].order) ||
             undefined
           : (sortedInfo.columnKey === "EPS" && sortedInfo.order) || undefined,
+      ellipsis: true,
+    },
+    {
+      title: "Predict Price",
+      dataIndex: "PredictPrice",
+      key: "PredictPrice",
+      sorter: true,
+      sortOrder:
+        sortedInfo instanceof Array
+          ? (sortedInfo[0].columnKey === "PredictPrice" &&
+              sortedInfo[0].order) ||
+            undefined
+          : (sortedInfo.columnKey === "PredictPrice" && sortedInfo.order) ||
+            undefined,
       ellipsis: true,
     },
   ];
