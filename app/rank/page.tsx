@@ -96,7 +96,7 @@ const App: React.FC = () => {
 
       // Fetch market prices for each symbol
       const updatedData = await Promise.all(
-        fetchedData.map(async (item) => {
+        fetchedData.map(async (item: Document) => {
           const marketPrice = await fetchMarketPrice(item.Symbol);
           const marginGap =
             marketPrice && item.PredictPrice

@@ -1,7 +1,13 @@
 // pages/api/fetchStockData.js
+import { NextApiRequest, NextApiResponse } from "next";
 import fetch from "node-fetch";
-
-export default async function handler(req, res) {
+// type ResponseData = {
+//   message: string;
+// };
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   const { symbol } = req.query;
   const apiUrl = `https://www.set.or.th/api/set/stock/${symbol}/related-product/o?lang=th`;
 
@@ -37,6 +43,6 @@ export default async function handler(req, res) {
     res.status(200).json(data);
   } catch (error) {
     console.error("Error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error });
   }
 }
