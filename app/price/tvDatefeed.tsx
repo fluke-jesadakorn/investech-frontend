@@ -1,3 +1,4 @@
+"use client";
 import * as moment from "moment";
 
 enum Interval {
@@ -102,7 +103,7 @@ class TvDatafeed {
         "s1",
         "symbol_1",
         Interval.in_1_minute,
-        10,
+        1,
       ]);
       this.sendMessage(ws, "switch_timezone", [chartSession, "exchange"]);
     };
