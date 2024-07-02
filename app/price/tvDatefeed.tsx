@@ -1,4 +1,5 @@
 import * as moment from "moment";
+import { io, Socket } from "socket.io-client";
 
 enum Interval {
   in_1_minute = "1",
@@ -16,11 +17,19 @@ enum Interval {
   in_monthly = "1M",
 }
 
+interface DataRow {
+  symbol: string;
+  time: string;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  volume?: number;
+  [key: string]: any;
+}
+
 class TvDatafeed {
-  private static wsHeaders = {
-    Origin: "https://data.tradingview.com",
-  };
-  private static wsTimeout = 5000;
+  private socket: Socket;
   private token: string;
   private wsDebug = false;
   private subscriptions: { symbol: string; exchange: string }[] = [];
@@ -30,103 +39,42 @@ class TvDatafeed {
   constructor(updateCallback: ((data: any) => void) | null = null) {
     this.token = "unauthorized_user_token";
     this.updateCallback = updateCallback;
-  }
+    this.socket = io("https://data.tradingview.com", {
+      transports: ["websocket"],
+      extraHeaders: {
+        Origin: "https://data.tradingview.com",
+      },
+    });
 
-  private createConnection(symbol: string, exchange: string) {
-    console.debug(`Creating websocket connection for ${exchange}:${symbol}`);
-    const session = this.generateSession();
-    const chartSession = this.generateChartSession();
+    this.socket.on("connect", () => {
+      console.debug("WebSocket connection opened");
+    });
 
-    const ws = new WebSocket(
-      "wss://data.tradingview.com/socket.io/websocket",
-      [],
-      {
-        headers: TvDatafeed.wsHeaders,
-      }
-    );
-
-    ws.onopen = () => {
-      console.debug(`WebSocket connection opened for ${exchange}:${symbol}`);
-      this.sendMessage(ws, "set_auth_token", [this.token]);
-      this.sendMessage(ws, "chart_create_session", [chartSession, ""]);
-      this.sendMessage(ws, "quote_create_session", [session]);
-      this.sendMessage(ws, "quote_set_fields", [
-        session,
-        "ch",
-        "chp",
-        "current_session",
-        "description",
-        "local_description",
-        "language",
-        "exchange",
-        "fractional",
-        "is_tradable",
-        "lp",
-        "lp_time",
-        "minmov",
-        "minmove2",
-        "original_name",
-        "pricescale",
-        "pro_name",
-        "short_name",
-        "type",
-        "update_mode",
-        "volume",
-        "currency_code",
-        "rchp",
-        "rtc",
-      ]);
-
-      this.sendMessage(ws, "quote_add_symbols", [
-        session,
-        `${exchange}:${symbol}`,
-        { flags: ["force_permission"] },
-      ]);
-      this.sendMessage(ws, "quote_fast_symbols", [
-        session,
-        `${exchange}:${symbol}`,
-      ]);
-      this.sendMessage(ws, "resolve_symbol", [
-        chartSession,
-        "symbol_1",
-        `={"symbol":"${exchange}:${symbol}","adjustment":"splits","session":"regular"}`,
-      ]);
-      this.sendMessage(ws, "create_series", [
-        chartSession,
-        "s1",
-        "s1",
-        "symbol_1",
-        Interval.in_1_minute,
-        1,
-      ]);
-      this.sendMessage(ws, "switch_timezone", [chartSession, "exchange"]);
-    };
-
-    ws.onmessage = (event) => {
-      this.handleMessage(event.data, symbol);
-    };
-
-    ws.onclose = () => {
-      console.debug(`WebSocket connection closed for ${exchange}:${symbol}`);
+    this.socket.on("disconnect", () => {
+      console.debug("WebSocket connection closed");
       if (!this.isReconnecting) {
         this.isReconnecting = true;
         setTimeout(() => {
-          this.createConnection(symbol, exchange);
+          this.socket.connect();
           this.isReconnecting = false;
         }, 5000);
       }
-    };
+    });
 
-    ws.onerror = (error) => {
-      console.error(`WebSocket error for ${exchange}:${symbol}: `, error);
+    this.socket.on("connect_error", (error: unknown) => {
+      console.error("WebSocket error: ", error);
       if (!this.isReconnecting) {
         this.isReconnecting = true;
         setTimeout(() => {
-          this.createConnection(symbol, exchange);
+          this.socket.connect();
           this.isReconnecting = false;
         }, 5000);
       }
-    };
+    });
+
+    this.socket.on("message", (message: string) => {
+      this.handleMessage(message);
+    });
   }
 
   private generateSession(): string {
@@ -161,15 +109,15 @@ class TvDatafeed {
     return this.prependHeader(this.constructMessage(func, paramList));
   }
 
-  private sendMessage(ws: WebSocket, func: string, args: any[]): void {
+  private sendMessage(func: string, args: any[]): void {
     const m = this.createMessage(func, args);
     if (this.wsDebug) {
       console.log(m);
     }
-    ws.send(m);
+    this.socket.emit("message", m);
   }
 
-  private handleMessage(data: string, symbol: string): void {
+  private handleMessage(data: string): void {
     const message = data.toString();
     console.debug("received message: ", message);
 
@@ -182,7 +130,7 @@ class TvDatafeed {
         try {
           const json = JSON.parse(jsonStr);
           console.debug("parsed message: ", json);
-          this.processJsonMessage(json, symbol);
+          this.processJsonMessage(json);
         } catch (error) {
           console.error("JSON Parse error: ", error);
         }
@@ -190,11 +138,11 @@ class TvDatafeed {
     }
   }
 
-  private processJsonMessage(json: any, symbol: string): void {
+  private processJsonMessage(json: any): void {
     if (json.m === "qsd") {
       const rawData = json.p[1].v;
       if (rawData) {
-        const df = this.createDf(JSON.stringify(rawData), symbol);
+        const df = this.createDf(JSON.stringify(rawData));
         console.log(df);
         if (this.updateCallback) {
           this.updateCallback(df);
@@ -203,7 +151,7 @@ class TvDatafeed {
     } else if (json.m === "timescale_update" || json.m === "du") {
       const rawData = json.p[1].s1.s;
       const df = rawData.map((bar: any) => ({
-        symbol: symbol,
+        symbol: bar.s,
         time: moment.unix(bar.i).format("YYYY-MM-DD HH:mm:ss"),
         open: bar.v[0],
         high: bar.v[1],
@@ -218,14 +166,14 @@ class TvDatafeed {
     }
   }
 
-  private createDf(rawData: string, symbol: string): any[] {
+  private createDf(rawData: string): DataRow[] {
     const out = rawData.match(/"s":\[(.+?)\}\]/)?.[1];
     if (!out) {
       console.error("no data, please check the exchange and symbol");
       return [];
     }
     const x = out.split(',{"');
-    const data: any[] = [];
+    const data: DataRow[] = [];
     let volumeData = true;
 
     for (let xi of x) {
@@ -234,10 +182,16 @@ class TvDatafeed {
         .unix(parseFloat(parts[4]))
         .format("YYYY-MM-DD HH:mm:ss");
 
-      const row = { symbol, time: ts };
-      const fields = ["open", "high", "low", "close", "volume"];
+      const row: DataRow = { symbol: "", time: ts };
+      const fields: (keyof DataRow)[] = [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+      ];
       for (let i = 0; i < fields.length; i++) {
-        if (!volumeData && i === fields.length - 1) {
+        if (!volumeData && fields[i] === "volume") {
           row[fields[i]] = 0.0;
           continue;
         }
@@ -263,6 +217,63 @@ class TvDatafeed {
     for (const { symbol, exchange } of symbols) {
       this.createConnection(symbol, exchange);
     }
+  }
+
+  private createConnection(symbol: string, exchange: string) {
+    console.debug(`Creating websocket connection for ${exchange}:${symbol}`);
+    const session = this.generateSession();
+    const chartSession = this.generateChartSession();
+
+    this.sendMessage("set_auth_token", [this.token]);
+    this.sendMessage("chart_create_session", [chartSession, ""]);
+    this.sendMessage("quote_create_session", [session]);
+    this.sendMessage("quote_set_fields", [
+      session,
+      "ch",
+      "chp",
+      "current_session",
+      "description",
+      "local_description",
+      "language",
+      "exchange",
+      "fractional",
+      "is_tradable",
+      "lp",
+      "lp_time",
+      "minmov",
+      "minmove2",
+      "original_name",
+      "pricescale",
+      "pro_name",
+      "short_name",
+      "type",
+      "update_mode",
+      "volume",
+      "currency_code",
+      "rchp",
+      "rtc",
+    ]);
+
+    this.sendMessage("quote_add_symbols", [
+      session,
+      `${exchange}:${symbol}`,
+      { flags: ["force_permission"] },
+    ]);
+    this.sendMessage("quote_fast_symbols", [session, `${exchange}:${symbol}`]);
+    this.sendMessage("resolve_symbol", [
+      chartSession,
+      "symbol_1",
+      `={"symbol":"${exchange}:${symbol}","adjustment":"splits","session":"regular"}`,
+    ]);
+    this.sendMessage("create_series", [
+      chartSession,
+      "s1",
+      "s1",
+      "symbol_1",
+      Interval.in_1_minute,
+      1,
+    ]);
+    this.sendMessage("switch_timezone", [chartSession, "exchange"]);
   }
 }
 

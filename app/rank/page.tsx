@@ -104,7 +104,7 @@ const App: React.FC = () => {
         pageSize,
       });
 
-      const symbolsToSubscribe = fetchedData.map((item) => ({
+      const symbolsToSubscribe = fetchedData.map((item: Document) => ({
         symbol: item.Symbol,
         exchange: "SET",
       }));
@@ -298,11 +298,15 @@ const App: React.FC = () => {
     filterIcon: (filtered: boolean) => (
       <SearchOutlined style={{ color: filtered ? "#1890ff" : undefined }} />
     ),
-    onFilter: (value, record) =>
-      record[dataIndex]
-        .toString()
-        .toLowerCase()
-        .includes((value as string).toLowerCase()),
+    onFilter: (value, record) => {
+      const recordValue = record[dataIndex];
+      return recordValue
+        ? recordValue
+            .toString()
+            .toLowerCase()
+            .includes((value as string).toLowerCase())
+        : false;
+    },
     onFilterDropdownOpenChange: (visible: boolean) => {
       if (visible) {
         setTimeout(() => searchInput.current?.select(), 100);

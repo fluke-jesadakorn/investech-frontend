@@ -61,7 +61,7 @@ const Home = () => {
                       {...field}
                       label="Symbol"
                       name={[field.name, "symbol"]}
-                      fieldKey={[field.fieldKey, "symbol"]}
+                      fieldKey={[field.fieldKey!, "symbol"]}
                       rules={[{ required: true, message: "Missing symbol" }]}
                     >
                       <Input placeholder="Enter symbol" />
@@ -72,7 +72,7 @@ const Home = () => {
                       {...field}
                       label="Exchange"
                       name={[field.name, "exchange"]}
-                      fieldKey={[field.fieldKey, "exchange"]}
+                      fieldKey={[field.fieldKey!, "exchange"]}
                       rules={[{ required: true, message: "Missing exchange" }]}
                     >
                       <Input placeholder="Enter exchange" />
