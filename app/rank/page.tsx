@@ -1,14 +1,14 @@
 "use client";
-
 import React, { useRef, useState, useEffect } from "react";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Input, Space, Table, AutoComplete } from "antd";
+import { Button, Input, Space, Table, AutoComplete, Spin } from "antd";
 import Highlighter from "react-highlight-words";
 import moment from "moment";
 import type { ColumnType, TablePaginationConfig } from "antd/es/table";
 import type { PaginationProps, InputRef, TableColumnsType } from "antd";
 import Link from "next/link";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
+import TvDatafeed, { Interval } from "../price/tvDatefeed";
 
 interface Document {
   key: string;
@@ -19,6 +19,9 @@ interface Document {
   Url: string;
   EPS: number;
   PredictPrice: number;
+  MarketPrice?: number;
+  MarketPriceLoading?: boolean;
+  MarginGap?: number;
 }
 
 type DataIndex = keyof Document;
@@ -41,56 +44,134 @@ const App: React.FC = () => {
   >({});
   const [searchText, setSearchText] = useState("");
   const [searchedColumn, setSearchedColumn] = useState<DataIndex | "">("");
-  const [symbolOptions, setSymbolOptions] = useState<string[]>([]); // Initialize as an empty array
+  const [symbolOptions, setSymbolOptions] = useState<string[]>([]);
   const searchInput = useRef<InputRef>(null);
+  const tvDatafeed = useRef<TvDatafeed | null>(null);
+
+  const fetchData = async (
+    page: number,
+    pageSize: number,
+    sorter: SorterResult<Document> | SorterResult<Document>[],
+    filters: Record<string, FilterValue | null>,
+    includeSymbol: boolean = false
+  ) => {
+    setLoading(true);
+    const sort = Array.isArray(sorter)
+      ? sorter[0]?.columnKey || "_id"
+      : sorter?.columnKey || "_id";
+    const order = Array.isArray(sorter)
+      ? sorter[0]?.order === "descend"
+        ? "desc"
+        : "asc"
+      : sorter?.order === "descend"
+      ? "desc"
+      : "asc";
+    const symbol =
+      includeSymbol && filters.Symbol ? (filters.Symbol[0] as string) : "";
+
+    // Log sort and filter parameters for debugging
+    console.log("Fetching data with parameters:", {
+      page,
+      pageSize,
+      sort,
+      order,
+      symbol,
+    });
+
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
+      );
+      const result = await response.json();
+
+      if (!result.data) {
+        throw new Error("No data found in the response");
+      }
+
+      const fetchedData = result.data.map((item: Document) => ({
+        ...item,
+        MarketPrice: 0,
+        MarketPriceLoading: true,
+        MarginGap: 0,
+        key: `${item.Symbol}-${item.Datetime}`, // Ensure each document has a unique key
+      }));
+
+      setData(fetchedData);
+      setPagination({
+        ...pagination,
+        total: result.total,
+        current: page,
+        pageSize,
+      });
+
+      const symbolsToSubscribe = fetchedData.map((item) => ({
+        symbol: item.Symbol,
+        exchange: "SET",
+      }));
+
+      if (tvDatafeed.current) {
+        tvDatafeed.current.subscribeSymbols(
+          symbolsToSubscribe,
+          Interval.in_1_minute,
+          1
+        );
+      }
+    } catch (error) {
+      console.error("There was an error fetching the data!", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRealTimeUpdate = (updateData: any[]) => {
+    setData((prevData) => {
+      const updatedData = prevData.map((dataItem) => {
+        const newData = updateData.find(
+          (newItem) => newItem.symbol === dataItem.Symbol
+        );
+        const MarketPrice = newData ? newData.close : dataItem.MarketPrice;
+        const MarginGap =
+          MarketPrice && dataItem.PredictPrice
+            ? ((MarketPrice - dataItem.PredictPrice) / dataItem.PredictPrice) *
+              100
+            : 0;
+        return newData
+          ? {
+              ...dataItem,
+              MarketPrice: MarketPrice,
+              MarketPriceLoading: false,
+              MarginGap: MarginGap,
+            }
+          : dataItem;
+      });
+
+      // Sort by MarginGap if sortedInfo specifies it
+      if (
+        sortedInfo &&
+        !Array.isArray(sortedInfo) &&
+        sortedInfo.columnKey === "MarginGap"
+      ) {
+        updatedData.sort((a, b) =>
+          sortedInfo.order === "descend"
+            ? (b.MarginGap || 0) - (a.MarginGap || 0)
+            : (a.MarginGap || 0) - (b.MarginGap || 0)
+        );
+      }
+
+      return updatedData;
+    });
+  };
 
   useEffect(() => {
+    tvDatafeed.current = new TvDatafeed(handleRealTimeUpdate);
     fetchData(
       pagination.current!,
       pagination.pageSize!,
       sortedInfo,
-      filteredInfo
+      filteredInfo,
+      true
     );
   }, []);
-
-  const fetchData = (
-    page: number,
-    pageSize: number,
-    sorter: SorterResult<Document> | SorterResult<Document>[],
-    filters: Record<string, FilterValue | null>
-  ) => {
-    setLoading(true);
-    const sort = Array.isArray(sorter)
-      ? sorter[0].columnKey
-      : sorter.columnKey || "_id";
-    const order = Array.isArray(sorter)
-      ? sorter[0].order === "descend"
-        ? "desc"
-        : "asc"
-      : sorter.order === "descend"
-      ? "desc"
-      : "asc";
-    const symbol = filters.Symbol ? (filters.Symbol[0] as string) : "";
-
-    fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/data?page=${page}&limit=${pageSize}&sort=${sort}&order=${order}&Symbol=${symbol}`
-    )
-      .then((res) => res.json())
-      .then((response) => {
-        setData(response.data);
-        setPagination({
-          ...pagination,
-          total: response.total,
-          current: page,
-          pageSize,
-        });
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("There was an error fetching the data!", error);
-        setLoading(false);
-      });
-  };
 
   const handleTableChange = (
     pagination: TablePaginationConfig,
@@ -121,7 +202,7 @@ const App: React.FC = () => {
     setFilteredInfo({});
     setSortedInfo({});
     setSymbolOptions([]);
-    fetchData(pagination.current!, pagination.pageSize!, {}, {});
+    fetchData(pagination.current!, pagination.pageSize!, {}, {}, true);
   };
 
   const fetchSymbols = (query: string) => {
@@ -130,7 +211,7 @@ const App: React.FC = () => {
     )
       .then((res) => res.json())
       .then((response) => {
-        setSymbolOptions(response.symbols || []); // Ensure it sets an array
+        setSymbolOptions(response.symbols || []);
       })
       .catch((error) => {
         console.error("There was an error fetching the symbols!", error);
@@ -249,9 +330,9 @@ const App: React.FC = () => {
       sorter: true,
       sortOrder:
         sortedInfo instanceof Array
-          ? (sortedInfo[0].columnKey === "Symbol" && sortedInfo[0].order) ||
+          ? (sortedInfo[0]?.columnKey === "Symbol" && sortedInfo[0]?.order) ||
             undefined
-          : (sortedInfo.columnKey === "Symbol" && sortedInfo.order) ||
+          : (sortedInfo?.columnKey === "Symbol" && sortedInfo?.order) ||
             undefined,
       ellipsis: true,
     },
@@ -262,9 +343,10 @@ const App: React.FC = () => {
       sorter: true,
       sortOrder:
         sortedInfo instanceof Array
-          ? (sortedInfo[0].columnKey === "Year" && sortedInfo[0].order) ||
+          ? (sortedInfo[0]?.columnKey === "Year" && sortedInfo[0]?.order) ||
             undefined
-          : (sortedInfo.columnKey === "Year" && sortedInfo.order) || undefined,
+          : (sortedInfo?.columnKey === "Year" && sortedInfo?.order) ||
+            undefined,
       ellipsis: true,
     },
     {
@@ -274,9 +356,9 @@ const App: React.FC = () => {
       sorter: true,
       sortOrder:
         sortedInfo instanceof Array
-          ? (sortedInfo[0].columnKey === "Quarter" && sortedInfo[0].order) ||
+          ? (sortedInfo[0]?.columnKey === "Quarter" && sortedInfo[0]?.order) ||
             undefined
-          : (sortedInfo.columnKey === "Quarter" && sortedInfo.order) ||
+          : (sortedInfo?.columnKey === "Quarter" && sortedInfo?.order) ||
             undefined,
       ellipsis: true,
       onFilter: (value, record) =>
@@ -307,12 +389,12 @@ const App: React.FC = () => {
       sorter: true,
       sortOrder:
         sortedInfo instanceof Array
-          ? (sortedInfo[0].columnKey === "Datetime" && sortedInfo[0].order) ||
+          ? (sortedInfo[0]?.columnKey === "Datetime" && sortedInfo[0]?.order) ||
             undefined
-          : (sortedInfo.columnKey === "Datetime" && sortedInfo.order) ||
+          : (sortedInfo?.columnKey === "Datetime" && sortedInfo?.order) ||
             undefined,
       ellipsis: true,
-      render: (text: string) => moment(text).format("DD/MM/YYYY MM:HH"), // Format the date
+      render: (text: string) => moment(text).format("DD/MM/YYYY MM:HH"),
     },
     {
       title: "Url",
@@ -332,9 +414,9 @@ const App: React.FC = () => {
       sorter: true,
       sortOrder:
         sortedInfo instanceof Array
-          ? (sortedInfo[0].columnKey === "EPS" && sortedInfo[0].order) ||
+          ? (sortedInfo[0]?.columnKey === "EPS" && sortedInfo[0]?.order) ||
             undefined
-          : (sortedInfo.columnKey === "EPS" && sortedInfo.order) || undefined,
+          : (sortedInfo?.columnKey === "EPS" && sortedInfo?.order) || undefined,
       ellipsis: true,
     },
     {
@@ -344,12 +426,42 @@ const App: React.FC = () => {
       sorter: true,
       sortOrder:
         sortedInfo instanceof Array
-          ? (sortedInfo[0].columnKey === "PredictPrice" &&
-              sortedInfo[0].order) ||
+          ? (sortedInfo[0]?.columnKey === "PredictPrice" &&
+              sortedInfo[0]?.order) ||
             undefined
-          : (sortedInfo.columnKey === "PredictPrice" && sortedInfo.order) ||
+          : (sortedInfo?.columnKey === "PredictPrice" && sortedInfo?.order) ||
             undefined,
       ellipsis: true,
+    },
+    {
+      title: "Market Price",
+      dataIndex: "MarketPrice",
+      key: "MarketPrice",
+      sorter: true,
+      sortOrder:
+        sortedInfo instanceof Array
+          ? (sortedInfo[0]?.columnKey === "MarketPrice" &&
+              sortedInfo[0]?.order) ||
+            undefined
+          : (sortedInfo?.columnKey === "MarketPrice" && sortedInfo?.order) ||
+            undefined,
+      ellipsis: true,
+      render: (text, record) => (record.MarketPriceLoading ? <Spin /> : text),
+    },
+    {
+      title: "%Margin Gap",
+      dataIndex: "MarginGap",
+      key: "MarginGap",
+      sorter: true,
+      sortOrder:
+        sortedInfo instanceof Array
+          ? (sortedInfo[0]?.columnKey === "MarginGap" &&
+              sortedInfo[0]?.order) ||
+            undefined
+          : (sortedInfo?.columnKey === "MarginGap" && sortedInfo?.order) ||
+            undefined,
+      ellipsis: true,
+      render: (text) => `${text?.toFixed(2)}%`, // Format as percentage with 2 decimal places
     },
   ];
 
@@ -376,7 +488,7 @@ const App: React.FC = () => {
           onClick={() => {
             setFilteredInfo({});
             setSortedInfo([]);
-            fetchData(pagination.current!, pagination.pageSize!, [], {});
+            fetchData(pagination.current!, pagination.pageSize!, [], {}, true);
           }}
         >
           Clear filters and sorters
@@ -384,7 +496,7 @@ const App: React.FC = () => {
       </Space>
       <Table
         columns={columns}
-        rowKey="id"
+        rowKey="key"
         dataSource={data}
         pagination={pagination}
         loading={loading}
