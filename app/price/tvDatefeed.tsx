@@ -1,5 +1,4 @@
 import * as moment from "moment";
-import { io, Socket } from "socket.io-client";
 
 enum Interval {
   in_1_minute = "1",
@@ -29,7 +28,10 @@ interface DataRow {
 }
 
 class TvDatafeed {
-  private socket: Socket;
+  private static wsHeaders = {
+    Origin: "https://data.tradingview.com",
+  };
+  private static wsTimeout = 5000;
   private token: string;
   private wsDebug = false;
   private subscriptions: { symbol: string; exchange: string }[] = [];
@@ -39,42 +41,97 @@ class TvDatafeed {
   constructor(updateCallback: ((data: any) => void) | null = null) {
     this.token = "unauthorized_user_token";
     this.updateCallback = updateCallback;
-    this.socket = io("https://data.tradingview.com", {
-      transports: ["websocket"],
-      extraHeaders: {
-        Origin: "https://data.tradingview.com",
-      },
-    });
+  }
 
-    this.socket.on("connect", () => {
-      console.debug("WebSocket connection opened");
-    });
+  private createConnection(symbol: string, exchange: string) {
+    console.debug(`Creating websocket connection for ${exchange}:${symbol}`);
+    const session = this.generateSession();
+    const chartSession = this.generateChartSession();
 
-    this.socket.on("disconnect", () => {
-      console.debug("WebSocket connection closed");
+    const ws = new WebSocket("wss://data.tradingview.com/socket.io/websocket");
+
+    ws.onopen = () => {
+      console.debug(`WebSocket connection opened for ${exchange}:${symbol}`);
+      this.sendMessage(ws, "set_auth_token", [this.token]);
+      this.sendMessage(ws, "chart_create_session", [chartSession, ""]);
+      this.sendMessage(ws, "quote_create_session", [session]);
+      this.sendMessage(ws, "quote_set_fields", [
+        session,
+        "ch",
+        "chp",
+        "current_session",
+        "description",
+        "local_description",
+        "language",
+        "exchange",
+        "fractional",
+        "is_tradable",
+        "lp",
+        "lp_time",
+        "minmov",
+        "minmove2",
+        "original_name",
+        "pricescale",
+        "pro_name",
+        "short_name",
+        "type",
+        "update_mode",
+        "volume",
+        "currency_code",
+        "rchp",
+        "rtc",
+      ]);
+
+      this.sendMessage(ws, "quote_add_symbols", [
+        session,
+        `${exchange}:${symbol}`,
+        { flags: ["force_permission"] },
+      ]);
+      this.sendMessage(ws, "quote_fast_symbols", [
+        session,
+        `${exchange}:${symbol}`,
+      ]);
+      this.sendMessage(ws, "resolve_symbol", [
+        chartSession,
+        "symbol_1",
+        `={"symbol":"${exchange}:${symbol}","adjustment":"splits","session":"regular"}`,
+      ]);
+      this.sendMessage(ws, "create_series", [
+        chartSession,
+        "s1",
+        "s1",
+        "symbol_1",
+        Interval.in_1_minute,
+        10,
+      ]);
+      this.sendMessage(ws, "switch_timezone", [chartSession, "exchange"]);
+    };
+
+    ws.onmessage = (event) => {
+      this.handleMessage(event.data, symbol);
+    };
+
+    ws.onclose = () => {
+      console.debug(`WebSocket connection closed for ${exchange}:${symbol}`);
       if (!this.isReconnecting) {
         this.isReconnecting = true;
         setTimeout(() => {
-          this.socket.connect();
+          this.createConnection(symbol, exchange);
           this.isReconnecting = false;
         }, 5000);
       }
-    });
+    };
 
-    this.socket.on("connect_error", (error: unknown) => {
-      console.error("WebSocket error: ", error);
+    ws.onerror = (error) => {
+      console.error(`WebSocket error for ${exchange}:${symbol}: `, error);
       if (!this.isReconnecting) {
         this.isReconnecting = true;
         setTimeout(() => {
-          this.socket.connect();
+          this.createConnection(symbol, exchange);
           this.isReconnecting = false;
         }, 5000);
       }
-    });
-
-    this.socket.on("message", (message: string) => {
-      this.handleMessage(message);
-    });
+    };
   }
 
   private generateSession(): string {
@@ -109,15 +166,15 @@ class TvDatafeed {
     return this.prependHeader(this.constructMessage(func, paramList));
   }
 
-  private sendMessage(func: string, args: any[]): void {
+  private sendMessage(ws: WebSocket, func: string, args: any[]): void {
     const m = this.createMessage(func, args);
     if (this.wsDebug) {
       console.log(m);
     }
-    this.socket.emit("message", m);
+    ws.send(m);
   }
 
-  private handleMessage(data: string): void {
+  private handleMessage(data: string, symbol: string): void {
     const message = data.toString();
     console.debug("received message: ", message);
 
@@ -130,7 +187,7 @@ class TvDatafeed {
         try {
           const json = JSON.parse(jsonStr);
           console.debug("parsed message: ", json);
-          this.processJsonMessage(json);
+          this.processJsonMessage(json, symbol);
         } catch (error) {
           console.error("JSON Parse error: ", error);
         }
@@ -138,11 +195,11 @@ class TvDatafeed {
     }
   }
 
-  private processJsonMessage(json: any): void {
+  private processJsonMessage(json: any, symbol: string): void {
     if (json.m === "qsd") {
       const rawData = json.p[1].v;
       if (rawData) {
-        const df = this.createDf(JSON.stringify(rawData));
+        const df = this.createDf(JSON.stringify(rawData), symbol);
         console.log(df);
         if (this.updateCallback) {
           this.updateCallback(df);
@@ -151,7 +208,7 @@ class TvDatafeed {
     } else if (json.m === "timescale_update" || json.m === "du") {
       const rawData = json.p[1].s1.s;
       const df = rawData.map((bar: any) => ({
-        symbol: bar.s,
+        symbol: symbol,
         time: moment.unix(bar.i).format("YYYY-MM-DD HH:mm:ss"),
         open: bar.v[0],
         high: bar.v[1],
@@ -166,7 +223,7 @@ class TvDatafeed {
     }
   }
 
-  private createDf(rawData: string): DataRow[] {
+  private createDf(rawData: string, symbol: string): DataRow[] {
     const out = rawData.match(/"s":\[(.+?)\}\]/)?.[1];
     if (!out) {
       console.error("no data, please check the exchange and symbol");
@@ -182,7 +239,7 @@ class TvDatafeed {
         .unix(parseFloat(parts[4]))
         .format("YYYY-MM-DD HH:mm:ss");
 
-      const row: DataRow = { symbol: "", time: ts };
+      const row: DataRow = { symbol, time: ts };
       const fields: (keyof DataRow)[] = [
         "open",
         "high",
@@ -217,63 +274,6 @@ class TvDatafeed {
     for (const { symbol, exchange } of symbols) {
       this.createConnection(symbol, exchange);
     }
-  }
-
-  private createConnection(symbol: string, exchange: string) {
-    console.debug(`Creating websocket connection for ${exchange}:${symbol}`);
-    const session = this.generateSession();
-    const chartSession = this.generateChartSession();
-
-    this.sendMessage("set_auth_token", [this.token]);
-    this.sendMessage("chart_create_session", [chartSession, ""]);
-    this.sendMessage("quote_create_session", [session]);
-    this.sendMessage("quote_set_fields", [
-      session,
-      "ch",
-      "chp",
-      "current_session",
-      "description",
-      "local_description",
-      "language",
-      "exchange",
-      "fractional",
-      "is_tradable",
-      "lp",
-      "lp_time",
-      "minmov",
-      "minmove2",
-      "original_name",
-      "pricescale",
-      "pro_name",
-      "short_name",
-      "type",
-      "update_mode",
-      "volume",
-      "currency_code",
-      "rchp",
-      "rtc",
-    ]);
-
-    this.sendMessage("quote_add_symbols", [
-      session,
-      `${exchange}:${symbol}`,
-      { flags: ["force_permission"] },
-    ]);
-    this.sendMessage("quote_fast_symbols", [session, `${exchange}:${symbol}`]);
-    this.sendMessage("resolve_symbol", [
-      chartSession,
-      "symbol_1",
-      `={"symbol":"${exchange}:${symbol}","adjustment":"splits","session":"regular"}`,
-    ]);
-    this.sendMessage("create_series", [
-      chartSession,
-      "s1",
-      "s1",
-      "symbol_1",
-      Interval.in_1_minute,
-      1,
-    ]);
-    this.sendMessage("switch_timezone", [chartSession, "exchange"]);
   }
 }
 
