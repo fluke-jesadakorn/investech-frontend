@@ -112,8 +112,10 @@ class TvDatafeed {
       this.handleMessage(event.data, symbol);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       console.debug(`WebSocket connection closed for ${exchange}:${symbol}`);
+      console.error('WebSocket Close Event:', event);
+
       if (!this.isReconnecting) {
         this.isReconnecting = true;
         setTimeout(() => {

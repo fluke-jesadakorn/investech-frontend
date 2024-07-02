@@ -8,7 +8,6 @@ import type { ColumnType, TablePaginationConfig } from "antd/es/table";
 import type { PaginationProps, InputRef, TableColumnsType } from "antd";
 import Link from "next/link";
 import { FilterValue, SorterResult } from "antd/es/table/interface";
-import TvDatafeed, { Interval } from "../price/tvDatefeed";
 
 interface Document {
   key: string;
@@ -46,7 +45,6 @@ const App: React.FC = () => {
   const [searchedColumn, setSearchedColumn] = useState<DataIndex | "">("");
   const [symbolOptions, setSymbolOptions] = useState<string[]>([]);
   const searchInput = useRef<InputRef>(null);
-  const tvDatafeed = useRef<TvDatafeed | null>(null);
 
   const fetchData = async (
     page: number,
@@ -96,26 +94,30 @@ const App: React.FC = () => {
         key: `${item.Symbol}-${item.Datetime}`, // Ensure each document has a unique key
       }));
 
-      setData(fetchedData);
+      // Fetch market prices for each symbol
+      const updatedData = await Promise.all(
+        fetchedData.map(async (item) => {
+          const marketPrice = await fetchMarketPrice(item.Symbol);
+          const marginGap =
+            marketPrice && item.PredictPrice
+              ? ((marketPrice - item.PredictPrice) / item.PredictPrice) * 100
+              : 0;
+          return {
+            ...item,
+            MarketPrice: marketPrice,
+            MarketPriceLoading: false,
+            MarginGap: marginGap,
+          };
+        })
+      );
+
+      setData(updatedData);
       setPagination({
         ...pagination,
         total: result.total,
         current: page,
         pageSize,
       });
-
-      const symbolsToSubscribe = fetchedData.map((item: Document) => ({
-        symbol: item.Symbol,
-        exchange: "SET",
-      }));
-
-      if (tvDatafeed.current) {
-        tvDatafeed.current.subscribeSymbols(
-          symbolsToSubscribe,
-          Interval.in_1_minute,
-          1
-        );
-      }
     } catch (error) {
       console.error("There was an error fetching the data!", error);
     } finally {
@@ -123,47 +125,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handleRealTimeUpdate = (updateData: any[]) => {
-    setData((prevData) => {
-      const updatedData = prevData.map((dataItem) => {
-        const newData = updateData.find(
-          (newItem) => newItem.symbol === dataItem.Symbol
-        );
-        const MarketPrice = newData ? newData.close : dataItem.MarketPrice;
-        const MarginGap =
-          MarketPrice && dataItem.PredictPrice
-            ? ((MarketPrice - dataItem.PredictPrice) / dataItem.PredictPrice) *
-              100
-            : 0;
-        return newData
-          ? {
-              ...dataItem,
-              MarketPrice: MarketPrice,
-              MarketPriceLoading: false,
-              MarginGap: MarginGap,
-            }
-          : dataItem;
-      });
-
-      // Sort by MarginGap if sortedInfo specifies it
-      if (
-        sortedInfo &&
-        !Array.isArray(sortedInfo) &&
-        sortedInfo.columnKey === "MarginGap"
-      ) {
-        updatedData.sort((a, b) =>
-          sortedInfo.order === "descend"
-            ? (b.MarginGap || 0) - (a.MarginGap || 0)
-            : (a.MarginGap || 0) - (b.MarginGap || 0)
-        );
-      }
-
-      return updatedData;
-    });
+  const fetchMarketPrice = async (symbol: string): Promise<number> => {
+    try {
+      const response = await fetch(`/api/fetchStockData?symbol=${symbol}`);
+      const result = await response.json();
+      return result.relatedProducts[0]?.last || 0;
+    } catch (error) {
+      console.error(`Error fetching market price for symbol ${symbol}:`, error);
+      return 0;
+    }
   };
 
   useEffect(() => {
-    tvDatafeed.current = new TvDatafeed(handleRealTimeUpdate);
     fetchData(
       pagination.current!,
       pagination.pageSize!,
